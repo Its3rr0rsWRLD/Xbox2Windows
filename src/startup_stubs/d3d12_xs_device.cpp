@@ -24,6 +24,9 @@
 #include "startup_stubs/heap_indexed_root.h"
 #include "startup_stubs/bc7_4k_s.h"
 #include "startup_stubs/bc64_chain.h"
+#include "startup_stubs/address_texture.h"
+#include "startup_stubs/list_upload_pages.h"
+#include <optional>
 #include "startup_stubs/derived_blend.h"
 #include "startup_stubs/placement_publish.h"
 #include "startup_stubs/placed_build.h"
@@ -1074,6 +1077,7 @@ void release_targets(Wrapper* self);
 void end_open_queries(Wrapper* self, ID3D12GraphicsCommandList* list);
 void reset_list_dynamic_state(Wrapper* self);
 void discard_draw_sampler_heaps(ID3D12CommandList* list);
+void discard_address_uploads(ID3D12CommandList* list);
 void use_as_target(Wrapper* self, ID3D12Resource* resource);
 bool is_container(const void* p);
 bool shader_dump_dir(wchar_t* out, DWORD size);
@@ -1352,6 +1356,7 @@ HRESULT __stdcall list_reset(Wrapper* self, void* allocator)
     if (SUCCEEDED(hr)) {
         reset_list_dynamic_state(self);
         discard_draw_sampler_heaps(previous);
+        discard_address_uploads(previous);
         if (draw_dump_frame()) draw_dumps().discard(previous);
     }
     InterlockedIncrement(SUCCEEDED(hr) ? &render_resets : &render_reset_failures);
@@ -1385,6 +1390,7 @@ HRESULT __stdcall list_close(Wrapper* self)
     InterlockedIncrement(&render_closes);
     if (FAILED(hr)) {
         discard_draw_sampler_heaps(list);
+        discard_address_uploads(list);
         if (draw_dump_frame()) draw_dumps().discard(list);
         static LONG failures;
         if (first_calls(failures, 6)) log("x2w-render list Close failed 0x%08lx", static_cast<unsigned long>(hr));
@@ -2568,6 +2574,7 @@ struct TextureWrite {
 };
 std::unordered_map<u64, TextureWrite>& written_textures();
 ID3D12Resource* sampled_address_texture(Wrapper* resource);
+bool console_layout_srv(const D3D12_RESOURCE_DESC& desc);
 #include "startup_stubs/d3d12_draw.inl"
 
 // Queue slot 10, desktop ExecuteCommandLists(count, lists).
@@ -2598,6 +2605,7 @@ void __stdcall queue_execute(Wrapper* self, UINT count, void* const* lists)
                 queue->ExecuteCommandLists(ready_count, ready.data());
             }
             retire_draw_sampler_heaps(queue, ready);
+            retire_address_uploads(queue, ready);
             note_submits(queue, submitted);
             InterlockedIncrement(&render_executes);
         }
